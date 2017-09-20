@@ -1,0 +1,117 @@
+---
+title: "Qualitative Activity Recognition of Weight Lifting Exercises"
+author: "Lee Gang"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+
+In this project we attempted to construct a predictive model to quantify how well a bumbell barbell lifting movement is executed using data from accelerometers on the participant and dumbell. The predictive model should predict the correct class of movement from a set of five different classes using data at any single point in time. Two models are constructed using linear discriminant analysis (LDA) and XGBOOST respectively. The XGBOOST model achieved almost 100% accuracy on the cross validation set, and 100% accuracy on the test set.
+
+## Introduction
+
+The objective of this project is to construct a predictive model to quantify how well a particular set of movement (in this case, dumbell lifting) is done, using data from accelerometers on the belt, forearm, arm, and dumbell of participants at any point in time.
+
+This project is based on the study of the same title conducted by Velloso, E. *et. al.* (2013). However, the scope of this project is to construct a model based on the same dataset for the prediction of quality of weight lifting exercise execution. The full dataset used in this analysis and the relevant documentation can be found [here](http://groupware.les.inf.puc-rio.br/har).
+
+The training dataset can be downloaded [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv).
+The testing dataset can be downloaded [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).
+
+## Data Exploration, Cleaning & Processing
+
+Load data and dependencies. 
+```{r}
+library(caret)
+raw_training <- read.csv("pml training.csv")
+raw_testing <- read.csv("pml testing.csv")
+set.seed(1234)
+```
+
+Split the raw_training dataset into a training dataset (80%) and a cross-validation dataset (20%) based on the *classe* variable.
+```{r}
+inTrain <- createDataPartition(raw_training$classe, p=0.8, list = FALSE)
+training <- raw_training[inTrain,]
+cval <- raw_training[-inTrain,]
+```
+
+As the dataset consist of many variables with high proportions of NAs and near zero variance variables, we will remove these variables from our dataset.
+```{r}
+newdat <- training[, colMeans(is.na(training)) <= .50] 
+zerovar_list <- nearZeroVar(newdat)
+newdat1 <- newdat[,-zerovar_list]
+```
+
+Due to the nature of the objectives of this project and the test set provided, we will not be analysing the dataset as a time series (details in the limitation section below). We also removed the test subject's identity to reduce design bias.
+```{r}
+ctraining <- newdat1[,-(1:6)]
+ncol(ctraining)
+names(ctraining)
+```
+
+Now we will scale and center the *ctraining* dataset. We will then apply the same transformation to the cross validation dataset and the testing dataset.
+```{r}
+sc_trans <- preProcess(ctraining)
+sc_training <- predict(sc_trans,ctraining)
+sc_cval <- predict(sc_trans,cval)
+sc_testing <- predict(sc_trans,raw_testing)
+```
+
+## Model Construction
+
+We will be constructing two different prediction models from the *sc_training* dataset. The first model will constructed using linear discriminant analysis and the second model will be constructed using XGBOOST.
+
+### Model A: Linear Discriminant Analysis
+```{r cache=TRUE}
+fit_lda <- train(classe~., data=sc_training, method="lda")
+fit_lda$finalModel
+```
+
+Let's test the model on our cross validation dataset.
+```{r}
+pred_lda <- predict(fit_lda,sc_cval)
+confusionMatrix(pred_lda,sc_cval$classe)
+```
+
+According to the results of *Model A* on the cross validation dataset, the model only have an accuracy of `r confusionMatrix(pred_lda,sc_cval$classe)$overall[[1]]`.
+
+### Model B: XGBOOST
+```{r cache=TRUE}
+control <- trainControl(method="cv", number=3, allowParallel = TRUE)
+fit_xgb <- train(classe~., method ="xgbTree", data=sc_training, trControl = control)
+fit_xgb$finalModel
+```
+
+Let's test the model on our cross validation dataset.
+```{r}
+pred_xgb <- predict(fit_xgb,sc_cval)
+confusionMatrix(pred_xgb,sc_cval$classe)
+```
+
+According to the results of *Model B* on the cross validation dataset, the model have a high accuracy of `r confusionMatrix(pred_xgb,sc_cval$classe)$overall[[1]]`.
+
+## Model Selection & Prediction
+
+As *Model B* using XGBOOST have almost 100% accuracy on the cross validation set, no other models will be constructed or ensembled. We will be using *Model B* directly for the prediction of the testing dataset.
+
+```{r}
+pred_testing <- predict(fit_xgb,sc_testing)
+pred_testing
+```
+
+## Conclusion
+
+Our model performed a 100% accuracy prediction on the testing dataset.
+
+## Limitations
+
+Although the accuracy of the model prediction is good, it might not generalize well when applied to a wider range of subjects, as only six participants are involved in this study, and only a few specific movements (five different barbell lifting movements) are recorded. And due to the data in itself is a time-series dataset, it is should be analysed using time series analysis (in this case, a sliding window analysis as a complete movement includes a combination of sequential entry records), and the testing dataset should be split by time chunks or by windows.
+
+On a side note, due to the nature of the selection of the testing dataset, no prediction model is actually required to predict the *classe* variable. The *num_window* variable is a unique identifier of the window of a set of movement. A 100% prediction can be made by just matching the *num_window* on the testing dataset and the training dataset.
+
+## References
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
